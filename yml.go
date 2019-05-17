@@ -64,6 +64,7 @@ func main() {
 }
 
 func (a Configuration) PrepareCron() {
+	fmt.Println("Preparing report array")
 	report := ReadKeyFileData()
 
 	var i int
@@ -71,9 +72,9 @@ func (a Configuration) PrepareCron() {
 	key:=make([]int,i+1)
 	
 	c := cron.New()
-	fmt.Println("Preparing report array")
+	
 	for i = range a.Exporters {
-		CheckKeyDataAndAddToCron(a, c, i, key, report)
+		PrepareKeyIndexBeforeRunCron(a, c, i, key, report)
 	}
 	fmt.Println("Start Program")
 
@@ -90,7 +91,7 @@ func (a Configuration) PrepareCron() {
 	for	{ c.Start() }
 }
 
-func CheckKeyDataAndAddToCron(a Configuration, c *cron.Cron, index int, key []int, report [][]string){
+func PrepareKeyIndexBeforeRunCron(a Configuration, c *cron.Cron, index int, key []int, report [][]string){
 	//check if key[index] of every single exporters has or not
 	key[index] = 0
 	if report!=nil {
@@ -119,6 +120,8 @@ func ReadKeyFileData() ([][]string){
 	if err == nil {
 		r := csv.NewReader(csvfile)
 		report, _ = r.ReadAll()
+	} else{
+		fmt.Println("Doesn't have a report file => Begin to create key.csv to store report")
 	}
     csvfile.Close()
 	return report
