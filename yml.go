@@ -53,7 +53,7 @@ type exporter struct {
 	Querykey  		string `yaml:"querykey"`
 	Database  		string `yaml:"database"`
 	Storage   		string `yaml:"storage"`
-	Subfolder 		string `yaml:"subfolder"`
+	Localfolder     string `yaml:"localfolder"`
 	Subfolderinaws  string `yaml:"subfolderinaws"`
 	Filename  		string `yaml:"filename"`
 }
@@ -72,7 +72,7 @@ func (a Configuration) PrepareCron() {
 	
 	c := cron.New()
 	for i = range a.Exporters {
-		a.CheckKeyDataAndAddToCron(c, i, key, report)
+		CheckKeyDataAndAddToCron(a, c, i, key, report)
 	}
 
 	// start cron
@@ -82,13 +82,13 @@ func (a Configuration) PrepareCron() {
 		<-sig
 		c.Stop()
         fmt.Println("\nPause and exit")
-        os.Exit(1)
+        os.Exit(0)
 	}()
 
 	for	{ c.Start() }
 }
 
-func (a Configuration) CheckKeyDataAndAddToCron(c *cron.Cron, index int, key []int, report [][]string){
+func CheckKeyDataAndAddToCron(a Configuration, c *cron.Cron, index int, key []int, report [][]string){
 	//check if key[index] of every single exporters has or not
 	key[index] = 0
 	if report!=nil {
@@ -96,10 +96,10 @@ func (a Configuration) CheckKeyDataAndAddToCron(c *cron.Cron, index int, key []i
 		fmt.Println("report[", index, "]= ", report[index][0])
 	}
 
-	a.AddDataEverySingleScheduleIntoCron(c, key, index)	
+	AddDataEverySingleScheduleIntoCron(a, c, key, index)	
 }
 
-func (a Configuration) AddDataEverySingleScheduleIntoCron(c *cron.Cron, key []int, index int){
+func AddDataEverySingleScheduleIntoCron(a Configuration, c *cron.Cron, key []int, index int){
 	// input given input in config into cron
 	c.AddFunc(a.Exporters[index].Scheduler, func() {
 	func(i int) {
@@ -171,7 +171,7 @@ func (export exporter) StartQueryDB(db *sql.DB, key int, check bool, storageupto
 	}
 
 	filename := export.ChangeFilenameIfChangeKeyIndex(checkifchange)
-	err := sqltocsv.WriteFile(export.Subfolder+filename, rows)
+	err := sqltocsv.WriteFile(export.Localfolder+filename, rows)
 	storageuptos3.CheckS3IfAvailable(filename, export)
 
 	if err != nil {
@@ -231,7 +231,7 @@ func (store storage) CheckS3IfAvailable(fileName string, export exporter) {
 }
 
 func (store storage) AddFileToS3(s *session.Session, fileDir string, export exporter) error {
-	file, err := os.Open(export.Subfolder+fileDir)
+	file, err := os.Open(export.Localfolder+fileDir)
 	if err != nil {
 		return err
 	}
