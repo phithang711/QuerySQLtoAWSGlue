@@ -71,9 +71,11 @@ func (a Configuration) PrepareCron() {
 	key:=make([]int,i+1)
 	
 	c := cron.New()
+	fmt.Println("Preparing report array")
 	for i = range a.Exporters {
 		CheckKeyDataAndAddToCron(a, c, i, key, report)
 	}
+	fmt.Println("Start Program")
 
 	// start cron
 	sig := make(chan os.Signal)
@@ -82,7 +84,7 @@ func (a Configuration) PrepareCron() {
 		<-sig
 		c.Stop()
         fmt.Println("\nPause and exit")
-        os.Exit(0)
+		os.Exit(0)
 	}()
 
 	for	{ c.Start() }
@@ -93,9 +95,8 @@ func CheckKeyDataAndAddToCron(a Configuration, c *cron.Cron, index int, key []in
 	key[index] = 0
 	if report!=nil {
 		key[index], _ = strconv.Atoi(report[index][0])
-		fmt.Println("report[", index, "]= ", report[index][0])
+		fmt.Println("report[", index,"]= ", report[index][0])
 	}
-
 	AddDataEverySingleScheduleIntoCron(a, c, key, index)	
 }
 
@@ -103,10 +104,11 @@ func AddDataEverySingleScheduleIntoCron(a Configuration, c *cron.Cron, key []int
 	// input given input in config into cron
 	c.AddFunc(a.Exporters[index].Scheduler, func() {
 	func(i int) {
+		fmt.Println("\nStart exporter[",index,"]")
 		key[i] = a.Exporters[i].StartAddData(a.Databases[a.Exporters[i].Database], a.Storages[a.Exporters[i].Storage], key[i])
 		st := strings.Trim(strings.Join(strings.Fields(fmt.Sprint(key)), "\n"), "[]")
 		WriteToFile(st)
-		fmt.Println(key)
+		fmt.Println("Report array after update: ",key)
 	}(index)
 	})
 }
@@ -136,7 +138,7 @@ func WriteToFile(st string) {
 
 
 func (export exporter) StartAddData(database database, storage storage, key int) (int) {
-	fmt.Println(key)
+	fmt.Println("Start from index: ",key)
 
 	check := strings.Contains(export.Query, "WHERE")
 
@@ -202,10 +204,16 @@ func (export exporter) NewKeyIndex(db *sql.DB,key int, check bool)(int,bool){
 		}
 	}
 
-	if (newkey>key) && (key!=0){
+	if (newkey>key) && (key!=0) {
 		checkifchange = true
 	} else {
 		checkifchange = false
+	}
+
+	if (newkey>key) {
+		fmt.Println("End query at index: ",newkey)
+	} else {
+		fmt.Println("Nothing new to query")
 	}
 
 	return newkey, checkifchange
@@ -225,7 +233,7 @@ func (export exporter) ChangeFilenameIfChangeKeyIndex(check bool) (string){
 func (store storage) CheckS3IfAvailable(fileName string, export exporter) {
 	s, testconnect := session.NewSession(&aws.Config{Region: aws.String(store.S3region)})
 	if testconnect != nil {
-		log.Fatalf("cannot to s3 data: %v", testconnect)
+		log.Fatalf("Cannot to AWS S3 storage: %v", testconnect)
 	}
 	testconnect = store.AddFileToS3(s, fileName, export)
 }
