@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	_ "github.com/go-sql-driver/mysql" // or the driver of your choice
-	"github.com/joho/sqltocsv"
 
 	"github.com/robfig/cron"
 
@@ -17,8 +16,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"syscall"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -30,7 +29,7 @@ import (
 type Configuration struct {
 	Databases map[string]database `yaml:"databases"`
 	Storages  map[string]storage  `yaml:"storages"`
-	Exporters []exporter `yaml:"exporters"`
+	Exporters []exporter          `yaml:"exporters"`
 }
 
 type database struct {
@@ -48,85 +47,106 @@ type storage struct {
 }
 
 type exporter struct {
-	Scheduler 		string `yaml:"scheduler"`
-	Query    	 	string `yaml:"query"`
-	Querykey  		string `yaml:"querykey"`
-	Database  		string `yaml:"database"`
-	Storage   		string `yaml:"storage"`
-	Localfolder     string `yaml:"localfolder"`
-	Subfolderinaws  string `yaml:"subfolderinaws"`
-	Filename  		string `yaml:"filename"`
+	Scheduler      string `yaml:"scheduler"`
+	Query          string `yaml:"query"`
+	Querykey       string `yaml:"querykey"`
+	Database       string `yaml:"database"`
+	Storage        string `yaml:"storage"`
+	Localfolder    string `yaml:"localfolder"`
+	Subfolderinaws string `yaml:"subfolderinaws"`
+	Filename       string `yaml:"filename"`
+}
+
+func signalHandle() <-chan struct{} {
+	quit := make(chan struct{})
+
+	go func() {
+		sig := make(chan os.Signal)
+		signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+
+		defer func() {
+			close(sig)
+			close(quit)
+			fmt.Println("\nPause and exit")
+		}()
+
+		<-sig
+	}()
+
+	return quit
 }
 
 func main() {
-	a := ParseConfig()
-	a.PrepareCron()
+
+	quit := signalHandle()
+
+	c := ParseConfig().PrepareCron()
+
+	<-quit
+
+	c.Stop()
 }
 
-func (a Configuration) PrepareCron() {
-	fmt.Println("Preparing report array")
+func (a Configuration) PrepareCron() *cron.Cron {
+
+	fmt.Println("Preparing report file")
 	report := ReadKeyFileData()
 
-	var i int
-	for i=range a.Exporters{}
-	key:=make([]int,i+1)
-	
+	num := len(a.Exporters)
+	key := make([]int, num)
+
 	c := cron.New()
-	
-	for i = range a.Exporters {
-		PrepareKeyIndexBeforeRunCron(a, c, i, key, report)
+
+	for i := range a.Exporters {
+		PrepareStartIndexBeforeRunCron(a, c, i, key, report)
 	}
+
 	fmt.Println("Start Program")
 
-	// start cron
-	sig := make(chan os.Signal)
-	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
-    go func() {
-		<-sig
-		c.Stop()
-        fmt.Println("\nPause and exit")
-		os.Exit(0)
-	}()
+	c.Start()
 
-	for	{ c.Start() }
+	return c
 }
 
-func PrepareKeyIndexBeforeRunCron(a Configuration, c *cron.Cron, index int, key []int, report [][]string){
+func PrepareStartIndexBeforeRunCron(a Configuration, c *cron.Cron, index int, key []int, report [][]string) {
 	//check if key[index] of every single exporters has or not
 	key[index] = 0
-	if report!=nil {
-		key[index], _ = strconv.Atoi(report[index][0])
-		fmt.Println("report[", index,"]= ", report[index][0])
+	if report != nil {
+		if len(report) > index {
+			if report[index][0] != "" {
+				key[index], _ = strconv.Atoi(report[index][0])
+			}
+		}
+		fmt.Println("report[", index, "]= ", key[index])
 	}
-	AddDataEverySingleScheduleIntoCron(a, c, key, index)	
+	AddDataEverySingleScheduleIntoCron(a, c, key, index)
 }
 
-func AddDataEverySingleScheduleIntoCron(a Configuration, c *cron.Cron, key []int, index int){
+func AddDataEverySingleScheduleIntoCron(a Configuration, c *cron.Cron, key []int, index int) {
 	// input given input in config into cron
 	c.AddFunc(a.Exporters[index].Scheduler, func() {
-	func(i int) {
-		fmt.Println("\nStart exporter[",index,"]")
-		key[i] = a.Exporters[i].StartAddData(a.Databases[a.Exporters[i].Database], a.Storages[a.Exporters[i].Storage], key[i])
-		st := strings.Trim(strings.Join(strings.Fields(fmt.Sprint(key)), "\n"), "[]")
-		WriteToFile(st)
-		fmt.Println("Report array after update: ",key)
-	}(index)
+		func(i int) {
+			fmt.Println("\nStart exporter[", index, "]")
+			key[i] = a.Exporters[i].StartAddData(a.Databases[a.Exporters[i].Database], a.Storages[a.Exporters[i].Storage], key[i])
+			st := strings.Trim(strings.Join(strings.Fields(fmt.Sprint(key)), "\n"), "[]")
+			WriteToFile(st)
+			fmt.Println("Report array after update: ", key)
+		}(index)
 	})
 }
 
-func ReadKeyFileData() ([][]string){
+func ReadKeyFileData() [][]string {
 	var report [][]string
 	csvfile, err := os.Open("key.csv")
 	if err == nil {
 		r := csv.NewReader(csvfile)
 		report, _ = r.ReadAll()
-	} else{
-		fmt.Println("Doesn't have a report file => Begin to create key.csv to store report")
+	} else {
+		fmt.Println("Doesn't have a report file => System will automatic create file key.csv to store report")
 	}
-    csvfile.Close()
+	csvfile.Close()
 	return report
 }
-
 
 func WriteToFile(st string) {
 	file, err := os.Create("key.csv")
@@ -139,9 +159,8 @@ func WriteToFile(st string) {
 	csvWriter.Flush()
 }
 
-
-func (export exporter) StartAddData(database database, storage storage, key int) (int) {
-	fmt.Println("Start from index: ",key)
+func (export exporter) StartAddData(database database, storage storage, key int) int {
+	fmt.Println("Start from index: ", key)
 
 	check := strings.Contains(export.Query, "WHERE")
 
@@ -150,82 +169,85 @@ func (export exporter) StartAddData(database database, storage storage, key int)
 	if err != nil {
 		panic(err)
 	}
-	
-	defer db.Close()
-	
 
-    //take the key rows in the file and take the end int element of the rows and save the element to key
+	defer db.Close()
+
+	//take the key rows in the file and take the end int element of the rows and save the element to key
 	newkey, checkifchange := export.NewKeyIndex(db, key, check)
 
 	//query with the given query sentence in yaml
-	export.StartQueryDB(db,key,check, storage, checkifchange)	
+	export.StartQueryDB(db, key, check, storage, checkifchange)
 
-	if newkey>key {
+	if newkey > key {
 		return newkey
 	} else {
 		return key
 	}
 }
 
-func (export exporter) StartQueryDB(db *sql.DB, key int, check bool, storageuptos3 storage, checkifchange bool){
+func (export exporter) StartQueryDB(db *sql.DB, key int, check bool, storageuptos3 storage, checkifchange bool) {
 	var rows *sql.Rows
-	if check == true {
-		rows, _ = db.Query(export.Query + " AND ( " + export.Querykey + " > " + strconv.Itoa(key) + ")")
+
+	if export.Querykey != "" {
+		if check == true {
+			rows, _ = db.Query(export.Query + " AND ( " + export.Querykey + " > " + strconv.Itoa(key) + ")")
+		} else {
+			rows, _ = db.Query(export.Query + " WHERE ( " + export.Querykey + " > " + strconv.Itoa(key) + ")")
+		}
 	} else {
-		rows, _ = db.Query(export.Query + " WHERE ( " + export.Querykey + " > " + strconv.Itoa(key) + ")")
+		rows, _ = db.Query(export.Query)
 	}
-
 	filename := export.ChangeFilenameIfChangeKeyIndex(checkifchange)
-	err := sqltocsv.WriteFile(export.Localfolder+filename, rows)
+	filename = ZipFiles(export.Localfolder, filename, rows)
 	storageuptos3.CheckS3IfAvailable(filename, export)
-
-	if err != nil {
-		panic(err)
-	}
 }
 
-func (export exporter) NewKeyIndex(db *sql.DB,key int, check bool)(int,bool){
+func (export exporter) NewKeyIndex(db *sql.DB, key int, check bool) (int, bool) {
 	var newkey int
 	var checkifchange bool
 	var rows *sql.Rows
 
-	if check == true {
-		rows, _ = db.Query("SELECT " + export.Querykey + " FROM " + strings.Split(export.Query, "FROM")[1] + " AND ( " + export.Querykey + " > " + strconv.Itoa(key) + ")")
-	} else {
-		rows, _ = db.Query("SELECT " + export.Querykey + " FROM " + strings.Split(export.Query, "FROM")[1] + " WHERE ( " + export.Querykey + " > " + strconv.Itoa(key) + ")")
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		err := rows.Scan(&newkey)
-		if err != nil {
-			log.Fatal(err)
+	if export.Querykey != "" {
+		if check == true {
+			rows, _ = db.Query("SELECT " + export.Querykey + " FROM " + strings.Split(export.Query, "FROM")[1] + " AND ( " + export.Querykey + " > " + strconv.Itoa(key) + ")")
+		} else {
+			rows, _ = db.Query("SELECT " + export.Querykey + " FROM " + strings.Split(export.Query, "FROM")[1] + " WHERE ( " + export.Querykey + " > " + strconv.Itoa(key) + ")")
 		}
-		err = rows.Err()
-		if err != nil {
-			log.Fatal(err)
-		}
-	}
+		defer rows.Close()
 
-	if (newkey>key) && (key!=0) {
-		checkifchange = true
+		for rows.Next() {
+			err := rows.Scan(&newkey)
+			if err != nil {
+				log.Fatal(err)
+			}
+			err = rows.Err()
+			if err != nil {
+				log.Fatal(err)
+			}
+		}
+		if (newkey > key) && (key != 0) {
+			checkifchange = true
+		} else {
+			checkifchange = false
+		}
+
+		if newkey > key {
+			fmt.Println("End query at index: ", newkey)
+		} else {
+			fmt.Println("Nothing new to query")
+		}
 	} else {
 		checkifchange = false
-	}
-
-	if (newkey>key) {
-		fmt.Println("End query at index: ",newkey)
-	} else {
-		fmt.Println("Nothing new to query")
+		fmt.Println("No querykey so pull completed file from SQL into csv and upload to AWS S3")
 	}
 
 	return newkey, checkifchange
 }
 
-func (export exporter) ChangeFilenameIfChangeKeyIndex(check bool) (string){
+func (export exporter) ChangeFilenameIfChangeKeyIndex(check bool) string {
 	var filename string
 	dt := time.Now()
-	if check==true {
+	if check == true {
 		filename = export.Filename + dt.Format("_20060201_150405") + ".csv"
 	} else {
 		filename = export.Filename + ".csv"
@@ -242,7 +264,7 @@ func (store storage) CheckS3IfAvailable(fileName string, export exporter) {
 }
 
 func (store storage) AddFileToS3(s *session.Session, fileDir string, export exporter) error {
-	file, err := os.Open(export.Localfolder+fileDir)
+	file, err := os.Open(export.Localfolder + fileDir)
 	if err != nil {
 		return err
 	}
@@ -258,7 +280,7 @@ func (store storage) AddFileToS3(s *session.Session, fileDir string, export expo
 	// of the file you're uploading.
 	_, err = s3.New(s).PutObject(&s3.PutObjectInput{
 		Bucket:               aws.String(store.S3bucket),
-		Key:                  aws.String(export.Subfolderinaws+ fileDir),
+		Key:                  aws.String(export.Subfolderinaws + fileDir),
 		ACL:                  aws.String("private"),
 		Body:                 bytes.NewReader(buffer),
 		ContentLength:        aws.Int64(size),
