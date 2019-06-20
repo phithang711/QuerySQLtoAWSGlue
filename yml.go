@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	_ "github.com/go-sql-driver/mysql" // or the driver of your choice
+	"github.com/joho/sqltocsv"
 
 	"github.com/robfig/cron"
 
@@ -55,6 +56,7 @@ type exporter struct {
 	Localfolder    string `yaml:"localfolder"`
 	Subfolderinaws string `yaml:"subfolderinaws"`
 	Filename       string `yaml:"filename"`
+	Compress       bool   `yaml:"compress"`
 }
 
 func signalHandle() <-chan struct{} {
@@ -198,8 +200,14 @@ func (export exporter) StartQueryDB(db *sql.DB, key int, check bool, storageupto
 		rows, _ = db.Query(export.Query)
 	}
 	filename := export.ChangeFilenameIfChangeKeyIndex(checkifchange)
-	filename = ZipFiles(export.Localfolder, filename, rows)
-	storageuptos3.CheckS3IfAvailable(filename, export)
+
+	if export.Compress {
+		filename = ZipFiles(export.Localfolder, filename, rows)
+		storageuptos3.CheckS3IfAvailable(filename, export)
+	} else {
+		_ = sqltocsv.WriteFile(export.Localfolder+filename, rows)
+		storageuptos3.CheckS3IfAvailable(filename, export)
+	}
 }
 
 func (export exporter) NewKeyIndex(db *sql.DB, key int, check bool) (int, bool) {
